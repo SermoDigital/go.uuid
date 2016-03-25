@@ -23,6 +23,7 @@ package uuid
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 )
 
@@ -299,7 +300,7 @@ func TestValue(t *testing.T) {
 		t.Errorf("Error getting UUID value: %s", err)
 	}
 
-	if val != u.String() {
+	if !reflect.DeepEqual(val, u.Bytes()) {
 		t.Errorf("Wrong value returned, should be equal: %s and %s", val, u)
 	}
 }

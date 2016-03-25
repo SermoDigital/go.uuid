@@ -221,7 +221,7 @@ func (u *UUID) SetVariant() {
 // MarshalText implements the encoding.TextMarshaler interface.
 // The encoding is the same as returned by String.
 func (u UUID) MarshalText() (text []byte, err error) {
-	text = []byte(u.String())
+	text = u.Bytes()
 	return
 }
 
@@ -288,7 +288,7 @@ func (u *UUID) UnmarshalBinary(data []byte) (err error) {
 
 // Value implements the driver.Valuer interface.
 func (u UUID) Value() (driver.Value, error) {
-	return u.String(), nil
+	return u.Bytes(), nil
 }
 
 // Scan implements the sql.Scanner interface.
