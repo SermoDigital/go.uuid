@@ -77,13 +77,13 @@ var (
 // String parse helpers.
 var (
 	urnPrefix  = []byte("urn:uuid:")
-	byteGroups = []int{8, 4, 4, 4, 12}
+	byteGroups = [...]int{8, 4, 4, 4, 12}
 )
 
 func initClockSequence() {
-	buf := make([]byte, 2)
-	safeRandom(buf)
-	clockSequence = binary.BigEndian.Uint16(buf)
+	var buf [2]byte
+	safeRandom(buf[:])
+	clockSequence = binary.BigEndian.Uint16(buf[:])
 }
 
 func initHardwareAddr() {
@@ -129,7 +129,7 @@ type UUID [16]byte
 
 // The nil UUID is special form of UUID that is specified to have all
 // 128 bits set to zero.
-var Nil = UUID{}
+var Nil UUID
 
 // Predefined namespace UUIDs.
 var (
@@ -141,7 +141,7 @@ var (
 
 // And returns result of binary AND of two UUIDs.
 func And(u1 UUID, u2 UUID) UUID {
-	u := UUID{}
+	var u UUID
 	for i := 0; i < 16; i++ {
 		u[i] = u1[i] & u2[i]
 	}
@@ -150,7 +150,7 @@ func And(u1 UUID, u2 UUID) UUID {
 
 // Or returns result of binary OR of two UUIDs.
 func Or(u1 UUID, u2 UUID) UUID {
-	u := UUID{}
+	var u UUID
 	for i := 0; i < 16; i++ {
 		u[i] = u1[i] | u2[i]
 	}
@@ -180,15 +180,15 @@ func (u UUID) Variant() uint {
 	return VariantFuture
 }
 
-// Bytes returns bytes slice representation of UUID.
-func (u UUID) Bytes() []byte {
-	return u[:]
+// IsNil returns true if u is a nil UUID.
+func (u UUID) IsNil() bool {
+	return Equal(u, Nil)
 }
 
-// Returns canonical string representation of UUID:
+// Bytes returns the canonical representation of a UUID as byte slice:
 // xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
-func (u UUID) String() string {
-	buf := make([]byte, 36)
+func (u UUID) Bytes() []byte {
+	var buf [36]byte
 
 	hex.Encode(buf[0:8], u[0:4])
 	buf[8] = dash
@@ -199,8 +199,13 @@ func (u UUID) String() string {
 	hex.Encode(buf[19:23], u[8:10])
 	buf[23] = dash
 	hex.Encode(buf[24:], u[10:])
+	return buf[:]
+}
 
-	return string(buf)
+// String returns the canonical representation of UUID as a string:
+// xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
+func (u UUID) String() string {
+	return string(u.Bytes())
 }
 
 // SetVersion sets version bits.
@@ -252,7 +257,6 @@ func (u *UUID) UnmarshalText(text []byte) (err error) {
 		}
 
 		_, err = hex.Decode(b[:byteGroup/2], t[:byteGroup])
-
 		if err != nil {
 			return
 		}
@@ -266,7 +270,7 @@ func (u *UUID) UnmarshalText(text []byte) (err error) {
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
 func (u UUID) MarshalBinary() (data []byte, err error) {
-	data = u.Bytes()
+	data = u[:]
 	return
 }
 
@@ -309,17 +313,15 @@ func (u *UUID) Scan(src interface{}) error {
 // It will return error if the slice isn't 16 bytes long.
 func FromBytes(input []byte) (u UUID, err error) {
 	err = u.UnmarshalBinary(input)
-	return
+	return u, err
 }
 
 // FromBytesOrNil returns UUID converted from raw byte slice input.
 // Same behavior as FromBytes, but returns a Nil UUID on error.
-func FromBytesOrNil(input []byte) UUID {
-	uuid, err := FromBytes(input)
-	if err != nil {
-		return Nil
-	}
-	return uuid
+func FromBytesOrNil(input []byte) (u UUID) {
+	// FromBytes returns Nil on error.
+	u, _ = FromBytes(input)
+	return u
 }
 
 // FromString returns UUID parsed from string input.
@@ -341,26 +343,29 @@ func FromStringOrNil(input string) UUID {
 
 // Returns UUID v1/v2 storage state.
 // Returns epoch timestamp, clock sequence, and hardware address.
-func getStorage() (uint64, uint16, []byte) {
+func getStorage() (now uint64, seq uint16, addr [6]byte) {
 	storageOnce.Do(initStorage)
 
 	storageMutex.Lock()
-	defer storageMutex.Unlock()
 
-	timeNow := epochFunc()
+	now = epochFunc()
 	// Clock changed backwards since last UUID generation.
 	// Should increase clock sequence.
-	if timeNow <= lastTime {
+	if now <= lastTime {
 		clockSequence++
 	}
-	lastTime = timeNow
+	lastTime = now
 
-	return timeNow, clockSequence, hardwareAddr[:]
+	seq = clockSequence
+	addr = hardwareAddr
+
+	storageMutex.Unlock()
+	return now, seq, addr
 }
 
 // NewV1 returns UUID based on current timestamp and MAC address.
 func NewV1() UUID {
-	u := UUID{}
+	var u UUID
 
 	timeNow, clockSeq, hardwareAddr := getStorage()
 
@@ -369,7 +374,7 @@ func NewV1() UUID {
 	binary.BigEndian.PutUint16(u[6:], uint16(timeNow>>48))
 	binary.BigEndian.PutUint16(u[8:], clockSeq)
 
-	copy(u[10:], hardwareAddr)
+	copy(u[10:], hardwareAddr[:])
 
 	u.SetVersion(1)
 	u.SetVariant()
@@ -379,14 +384,13 @@ func NewV1() UUID {
 
 // NewV2 returns DCE Security UUID based on POSIX UID/GID.
 func NewV2(domain byte) UUID {
-	u := UUID{}
+	var u UUID
 
 	timeNow, clockSeq, hardwareAddr := getStorage()
 
-	switch domain {
-	case DomainPerson:
+	if domain == DomainPerson {
 		binary.BigEndian.PutUint32(u[0:], posixUID)
-	case DomainGroup:
+	} else if domain == DomainGroup {
 		binary.BigEndian.PutUint32(u[0:], posixGID)
 	}
 
@@ -395,7 +399,7 @@ func NewV2(domain byte) UUID {
 	binary.BigEndian.PutUint16(u[8:], clockSeq)
 	u[9] = domain
 
-	copy(u[10:], hardwareAddr)
+	copy(u[10:], hardwareAddr[:])
 
 	u.SetVersion(2)
 	u.SetVariant()
@@ -414,7 +418,7 @@ func NewV3(ns UUID, name string) UUID {
 
 // NewV4 returns random generated UUID.
 func NewV4() UUID {
-	u := UUID{}
+	var u UUID
 	safeRandom(u[:])
 	u.SetVersion(4)
 	u.SetVariant()
@@ -433,7 +437,7 @@ func NewV5(ns UUID, name string) UUID {
 
 // Returns UUID based on hashing of namespace UUID and name.
 func newFromHash(h hash.Hash, ns UUID, name string) UUID {
-	u := UUID{}
+	var u UUID
 	h.Write(ns[:])
 	h.Write([]byte(name))
 	copy(u[:], h.Sum(nil))
