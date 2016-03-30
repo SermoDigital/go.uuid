@@ -185,6 +185,11 @@ func (u UUID) IsNil() bool {
 	return Equal(u, Nil)
 }
 
+// Equals returns true if Equal(u, u2).
+func (u UUID) Equals(u2 UUID) bool {
+	return Equal(u, u2)
+}
+
 // Bytes returns the canonical representation of a UUID as byte slice:
 // xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
 func (u UUID) Bytes() []byte {
