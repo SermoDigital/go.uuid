@@ -1,4 +1,4 @@
-// +build unsafe
+// +build amd64
 
 package uuid
 
