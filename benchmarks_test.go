@@ -22,6 +22,7 @@
 package uuid
 
 import (
+	"database/sql/driver"
 	"testing"
 )
 
@@ -89,14 +90,14 @@ func BenchmarkNewV5(b *testing.B) {
 var data []byte
 
 func BenchmarkMarshalBinary(b *testing.B) {
-	u := NewV4()
+	u = NewV4()
 	for i := 0; i < b.N; i++ {
 		data, err = u.MarshalBinary()
 	}
 }
 
 func BenchmarkMarshalText(b *testing.B) {
-	u := NewV4()
+	u = NewV4()
 	for i := 0; i < b.N; i++ {
 		data, err = u.MarshalText()
 	}
@@ -104,7 +105,6 @@ func BenchmarkMarshalText(b *testing.B) {
 
 func BenchmarkUnmarshalBinary(b *testing.B) {
 	bytes := []byte{0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8}
-	var u UUID
 	for i := 0; i < b.N; i++ {
 		err = u.UnmarshalBinary(bytes)
 	}
@@ -112,7 +112,6 @@ func BenchmarkUnmarshalBinary(b *testing.B) {
 
 func BenchmarkUnmarshalText(b *testing.B) {
 	bytes := []byte("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
-	var u UUID
 	for i := 0; i < b.N; i++ {
 		err = u.UnmarshalText(bytes)
 	}
@@ -121,8 +120,14 @@ func BenchmarkUnmarshalText(b *testing.B) {
 var s string
 
 func BenchmarkMarshalToString(b *testing.B) {
-	u := NewV4()
+	u = NewV4()
 	for i := 0; i < b.N; i++ {
 		s = u.String()
+	}
+}
+func BenchmarkScan(b *testing.B) {
+	v := driver.Value(NewV4().String())
+	for i := 0; i < b.N; i++ {
+		err = u.Scan(&v)
 	}
 }

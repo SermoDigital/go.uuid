@@ -127,7 +127,7 @@ func unixTimeFunc() uint64 {
 // described in RFC 4122.
 type UUID [16]byte
 
-// The nil UUID is special form of UUID that is specified to have all
+// Nil is a special form of UUID that is specified to have all
 // 128 bits set to zero.
 var Nil UUID
 
@@ -164,12 +164,13 @@ func (u UUID) Version() uint {
 
 // Variant returns UUID layout variant.
 func (u UUID) Variant() uint {
-	switch {
-	case (u[8] & 0x80) == 0x00:
+	if (u[8] & 0x80) == 0x00 {
 		return VariantNCS
-	case (u[8]&0xc0)|0x80 == 0x80:
+	}
+	if (u[8]&0xc0)|0x80 == 0x80 {
 		return VariantRFC4122
-	case (u[8]&0xe0)|0xc0 == 0xc0:
+	}
+	if (u[8]&0xe0)|0xc0 == 0xc0 {
 		return VariantMicrosoft
 	}
 	return VariantFuture
@@ -189,7 +190,6 @@ func (u UUID) Equals(u2 UUID) bool {
 // xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
 func (u UUID) Bytes() []byte {
 	var buf [36]byte
-
 	hex.Encode(buf[0:8], u[0:4])
 	buf[8] = dash
 	hex.Encode(buf[9:13], u[4:6])
@@ -231,13 +231,16 @@ func (u UUID) MarshalText() (text []byte, err error) {
 // "{6ba7b810-9dad-11d1-80b4-00c04fd430c8}",
 // "urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 func (u *UUID) UnmarshalText(text []byte) (err error) {
+	// Plain UUID.
 	if len(text) < 32 {
-		err = fmt.Errorf("uuid: UUID string too short: %s", text)
-		return
+		return fmt.Errorf("uuid: UUID string too short: %q", text)
+	}
+	// urn prefix.
+	if len(text) > 45 {
+		return fmt.Errorf("uuid: UUID string too long: %q", text)
 	}
 
-	t := text[:]
-
+	t := text
 	if bytes.Equal(t[:9], urnPrefix) {
 		t = t[9:]
 	} else if t[0] == '{' {
@@ -245,15 +248,13 @@ func (u *UUID) UnmarshalText(text []byte) (err error) {
 	}
 
 	b := u[:]
-
 	for _, byteGroup := range byteGroups {
 		if t[0] == '-' {
 			t = t[1:]
 		}
 
 		if len(t) < byteGroup {
-			err = fmt.Errorf("uuid: UUID string too short: %s", text)
-			return
+			return fmt.Errorf("uuid: UUID string too short: %q", text)
 		}
 
 		_, err = hex.Decode(b[:byteGroup/2], t[:byteGroup])
@@ -264,8 +265,7 @@ func (u *UUID) UnmarshalText(text []byte) (err error) {
 		t = t[byteGroup:]
 		b = b[byteGroup/2:]
 	}
-
-	return
+	return nil
 }
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
@@ -296,6 +296,9 @@ func (u UUID) Value() (driver.Value, error) {
 // a longer byte slice or a string is handled by UnmarshalText.
 func (u *UUID) Scan(src interface{}) error {
 	switch src := src.(type) {
+	case nil:
+		*u = Nil // Ensure |u| is all zeros.
+		return nil
 	case []byte:
 		if len(src) == 16 {
 			return u.UnmarshalBinary(src)
@@ -305,7 +308,6 @@ func (u *UUID) Scan(src interface{}) error {
 	case string:
 		return u.UnmarshalText([]byte(src))
 	}
-
 	return fmt.Errorf("uuid: cannot convert %T to UUID", src)
 }
 
