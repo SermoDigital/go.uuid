@@ -36,8 +36,10 @@ import (
 	"hash"
 	"net"
 	"os"
+	"runtime"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 // UUID layout variants.
@@ -123,12 +125,18 @@ func unixTimeFunc() uint64 {
 	return epochStart + uint64(time.Now().UnixNano()/100)
 }
 
-// UUID representation compliant with specification
-// described in RFC 4122.
+// UUID representation compliant with specification described in RFC 4122.
 type UUID [16]byte
 
-// Nil is a special form of UUID that is specified to have all
-// 128 bits set to zero.
+// NullUUID can be used with the standard sql package to represent a UUID value
+// that can be NULL in the database
+type NullUUID struct {
+	UUID  UUID
+	Valid bool
+}
+
+// The nil UUID is special form of UUID that is specified to have all 128 bits
+// set to zero.
 var Nil UUID
 
 // Predefined namespace UUIDs.
@@ -186,6 +194,21 @@ func (u UUID) Equals(u2 UUID) bool {
 	return Equal(u, u2)
 }
 
+// Equal returns true if u1 and u2 equals, otherwise false.
+func Equal(u1, u2 UUID) bool {
+	if runtime.GOOS == "amd64" {
+		return *(*uint64)(unsafe.Pointer(&u1[0])) == *(*uint64)(unsafe.Pointer(&u2[0])) &&
+			*(*uint64)(unsafe.Pointer(&u1[8])) == *(*uint64)(unsafe.Pointer(&u2[8]))
+	}
+	if runtime.GOOS == "386" {
+		return *(*uint32)(unsafe.Pointer(&u1[0])) == *(*uint32)(unsafe.Pointer(&u2[0])) &&
+			*(*uint32)(unsafe.Pointer(&u1[4])) == *(*uint32)(unsafe.Pointer(&u2[4])) &&
+			*(*uint32)(unsafe.Pointer(&u1[8])) == *(*uint32)(unsafe.Pointer(&u2[8])) &&
+			*(*uint32)(unsafe.Pointer(&u1[12])) == *(*uint32)(unsafe.Pointer(&u2[12]))
+	}
+	return u1 == u2
+}
+
 // Bytes returns the canonical representation of a UUID as byte slice:
 // xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
 func (u UUID) Bytes() []byte {
@@ -218,15 +241,14 @@ func (u *UUID) SetVariant() {
 	u[8] = (u[8] & 0xbf) | 0x80
 }
 
-// MarshalText implements the encoding.TextMarshaler interface.
-// The encoding is the same as returned by String.
+// MarshalText implements the encoding.TextMarshaler interface. The encoding is
+// the same as returned by String.
 func (u UUID) MarshalText() (text []byte, err error) {
-	text = u.Bytes()
-	return
+	return u.Bytes(), nil
 }
 
-// UnmarshalText implements the encoding.TextUnmarshaler interface.
-// Following formats are supported:
+// UnmarshalText implements the encoding.TextUnmarshaler interface. The following
+// formats are supported:
 // "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
 // "{6ba7b810-9dad-11d1-80b4-00c04fd430c8}",
 // "urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd430c8"
@@ -241,25 +263,36 @@ func (u *UUID) UnmarshalText(text []byte) (err error) {
 	}
 
 	t := text
+	braced := false
+
 	if bytes.Equal(t[:9], urnPrefix) {
 		t = t[9:]
 	} else if t[0] == '{' {
+		braced = true
 		t = t[1:]
 	}
 
 	b := u[:]
-	for _, byteGroup := range byteGroups {
-		if t[0] == '-' {
+	for i, byteGroup := range byteGroups {
+		if i > 0 {
+			if t[0] != '-' {
+				return fmt.Errorf("uuid: invalid string format")
+			}
 			t = t[1:]
 		}
 
 		if len(t) < byteGroup {
-			return fmt.Errorf("uuid: UUID string too short: %q", text)
+			return fmt.Errorf("uuid: UUID string too short: %s", text)
+		}
+
+		if i == 4 && len(t) > byteGroup &&
+			((braced && t[byteGroup] != '}') || len(t[byteGroup:]) > 1 || !braced) {
+			return fmt.Errorf("uuid: UUID string too long: %s", text)
 		}
 
 		_, err = hex.Decode(b[:byteGroup/2], t[:byteGroup])
 		if err != nil {
-			return
+			return err
 		}
 
 		t = t[byteGroup:]
@@ -270,20 +303,17 @@ func (u *UUID) UnmarshalText(text []byte) (err error) {
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
 func (u UUID) MarshalBinary() (data []byte, err error) {
-	data = u[:]
-	return
+	return u[:], nil
 }
 
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
 // It will return error if the slice isn't 16 bytes long.
 func (u *UUID) UnmarshalBinary(data []byte) (err error) {
 	if len(data) != 16 {
-		err = fmt.Errorf("uuid: UUID must be exactly 16 bytes long, got %d bytes", len(data))
-		return
+		return fmt.Errorf("uuid: UUID must be exactly 16 bytes long, got %d bytes", len(data))
 	}
 	copy(u[:], data)
-
-	return
+	return nil
 }
 
 // Value implements the driver.Valuer interface.
@@ -291,14 +321,11 @@ func (u UUID) Value() (driver.Value, error) {
 	return u.Bytes(), nil
 }
 
-// Scan implements the sql.Scanner interface.
-// A 16-byte slice is handled by UnmarshalBinary, while
-// a longer byte slice or a string is handled by UnmarshalText.
+// Scan implements the sql.Scanner interface. A 16-byte slice is handled by
+// UnmarshalBinary, while a longer byte slice or a string is handled by
+// UnmarshalText.
 func (u *UUID) Scan(src interface{}) error {
 	switch src := src.(type) {
-	case nil:
-		*u = Nil // Ensure |u| is all zeros.
-		return nil
 	case []byte:
 		if len(src) == 16 {
 			return u.UnmarshalBinary(src)
@@ -309,6 +336,41 @@ func (u *UUID) Scan(src interface{}) error {
 		return u.UnmarshalText([]byte(src))
 	}
 	return fmt.Errorf("uuid: cannot convert %T to UUID", src)
+}
+
+// Value implements the driver.Valuer interface.
+func (u NullUUID) Value() (driver.Value, error) {
+	if !u.Valid {
+		return nil, nil
+	}
+	// Delegate to UUID Value function.
+	return u.UUID.Value()
+}
+
+// Scan implements the sql.Scanner interface.
+func (u *NullUUID) Scan(src interface{}) error {
+	if src == nil {
+		u.UUID, u.Valid = Nil, false
+		return nil
+	}
+	// Delegate to UUID Scan function.
+	u.Valid = true
+	return u.UUID.Scan(src)
+}
+
+// MarshalText implements the encoding.TextMarshaler interface. The encoding is
+// the same as returned by String.
+func (u NullUUID) MarshalText() ([]byte, error) {
+	return u.UUID.MarshalText()
+}
+
+// UnmarshalText implements the encoding.TextUnmarshaler interface. The following
+// formats are supported:
+// "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+// "{6ba7b810-9dad-11d1-80b4-00c04fd430c8}",
+// "urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+func (u *NullUUID) UnmarshalText(data []byte) error {
+	return u.UUID.UnmarshalText(data)
 }
 
 // FromBytes returns UUID converted from raw byte slice input.
@@ -405,7 +467,6 @@ func NewV2(domain byte) UUID {
 
 	u.SetVersion(2)
 	u.SetVariant()
-
 	return u
 }
 
@@ -414,7 +475,6 @@ func NewV3(ns UUID, name string) UUID {
 	u := newFromHash(md5.New(), ns, name)
 	u.SetVersion(3)
 	u.SetVariant()
-
 	return u
 }
 
@@ -424,7 +484,6 @@ func NewV4() UUID {
 	safeRandom(u[:])
 	u.SetVersion(4)
 	u.SetVariant()
-
 	return u
 }
 
@@ -433,7 +492,6 @@ func NewV5(ns UUID, name string) UUID {
 	u := newFromHash(sha1.New(), ns, name)
 	u.SetVersion(5)
 	u.SetVariant()
-
 	return u
 }
 
@@ -443,6 +501,37 @@ func newFromHash(h hash.Hash, ns UUID, name string) UUID {
 	h.Write(ns[:])
 	h.Write([]byte(name))
 	copy(u[:], h.Sum(nil))
-
 	return u
+}
+
+// NewTime returns a time-based UUID. The first 40 bits are a unix timestamp, in
+// network order. The last 86 are random bytes from the OS' CSPRNG. (Two other
+// bits are the version, 'T', and variant.) 40 bits allows for a maximum
+// timestamp of 274877906944, which is August of 10680.
+func NewTime(t time.Time) UUID {
+	var u UUID
+	binary.BigEndian.PutUint64(u[:], uint64(t.Unix()<<24))
+
+	safeRandom(u[ /* 5 */ 40/8:])
+	u.SetVersion(6)
+	u.SetVariant()
+	return u
+}
+
+// Time returns the date encoded in the UUID, if any. Only applicable to UUIDs
+// version one and those created with NewTime. The returned boolean will be true
+// iff the UUID contains an encoded date.
+func (u UUID) Time() (t time.Time, ok bool) {
+	switch u.Version() {
+	case 1:
+		ts := int64(binary.BigEndian.Uint32(u[:])) |
+			int64(binary.BigEndian.Uint16(u[4:]))<<32 |
+			int64(binary.BigEndian.Uint16(u[6:])&0xFFF)<<48
+		return time.Unix(ts, 0), true
+	case 6:
+		ts := int64(binary.BigEndian.Uint64(u[:])) >> 24
+		return time.Unix(ts, 0), true
+	default:
+		return t, false
+	}
 }
