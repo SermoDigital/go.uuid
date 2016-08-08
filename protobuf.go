@@ -21,7 +21,14 @@ func (u UUID) Marshal() ([]byte, error) {
 }
 
 func (u UUID) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + u.MarshalText() + `"`)
+	b := make([]byte, 0, len(u)+2)
+	b = append(b, '"')
+	m, err := u.MarshalText()
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, m...)
+	return append(b, '"'), nil
 }
 
 func (u *UUID) UnmarshalJSON(data []byte) error {
