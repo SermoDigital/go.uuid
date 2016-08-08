@@ -190,7 +190,7 @@ func (u UUID) IsNil() bool {
 }
 
 // Equals returns true if Equal(u, u2).
-func (u UUID) Equals(u2 UUID) bool {
+func (u UUID) Equal(u2 UUID) bool {
 	return Equal(u, u2)
 }
 
