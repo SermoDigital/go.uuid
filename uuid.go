@@ -506,7 +506,7 @@ func newFromHash(h hash.Hash, ns UUID, name string) UUID {
 
 // NewTime returns a time-based UUID. The first 40 bits are a unix timestamp, in
 // network order. The last 86 are random bytes from the OS' CSPRNG. (Two other
-// bits are the version, 'T', and variant.) 40 bits allows for a maximum
+// bits are the version, 6, and variant.) 40 bits allows for a maximum
 // timestamp of 274877906944, which is August of 10680.
 func NewTime(t time.Time) UUID {
 	var u UUID
