@@ -38,7 +38,7 @@ func (u *UUID) UnmarshalJSON(data []byte) error {
 	if len(data) < 32 {
 		return fmt.Errorf("uuid: UUID string too short: %q", data)
 	}
-	if data[1] != '"' || data[len(data)-1] != '"' {
+	if data[0] != '"' || data[len(data)-1] != '"' {
 		return fmt.Errorf("uuid: invalid string format")
 	}
 	return u.UnmarshalText(data[1 : len(data)-1])
