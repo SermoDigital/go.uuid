@@ -2,7 +2,10 @@
 
 package uuid
 
-import "bytes"
+import (
+	"bytes"
+	"fmt"
+)
 
 func (u UUID) Size() int {
 	return len(u)
@@ -32,7 +35,13 @@ func (u UUID) MarshalJSON() ([]byte, error) {
 }
 
 func (u *UUID) UnmarshalJSON(data []byte) error {
-	return u.UnmarshalText(data)
+	if len(data) < 32 {
+		return fmt.Errorf("uuid: UUID string too short: %q", data)
+	}
+	if data[1] != '"' || data[len(data)-1] != '"' {
+		return fmt.Errorf("uuid: invalid string format")
+	}
+	return u.UnmarshalText(data[1 : len(data)-1])
 }
 
 func (u UUID) Compare(u2 UUID) int {
