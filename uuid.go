@@ -112,8 +112,8 @@ func initStorage() {
 	initHardwareAddr()
 }
 
-func safeRandom(dest []byte) {
-	if _, err := rand.Read(dest); err != nil {
+func safeRandom(dst []byte) {
+	if _, err := rand.Read(dst); err != nil {
 		panic(err)
 	}
 }
@@ -309,10 +309,9 @@ func (u UUID) MarshalBinary() (data []byte, err error) {
 // UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
 // It will return error if the slice isn't 16 bytes long.
 func (u *UUID) UnmarshalBinary(data []byte) (err error) {
-	if len(data) != 16 {
+	if copy(u[:], data) != len(UUID{}) {
 		return fmt.Errorf("uuid: UUID must be exactly 16 bytes long, got %d bytes", len(data))
 	}
-	copy(u[:], data)
 	return nil
 }
 
@@ -327,11 +326,10 @@ func (u UUID) Value() (driver.Value, error) {
 func (u *UUID) Scan(src interface{}) error {
 	switch src := src.(type) {
 	case []byte:
-		if len(src) == 16 {
+		if len(src) == len(UUID{}) {
 			return u.UnmarshalBinary(src)
 		}
 		return u.UnmarshalText(src)
-
 	case string:
 		return u.UnmarshalText([]byte(src))
 	}
@@ -488,16 +486,15 @@ func NewV4() UUID {
 }
 
 // NewV5 returns UUID based on SHA-1 hash of namespace UUID and name.
-func NewV5(ns UUID, name string) UUID {
-	u := newFromHash(sha1.New(), ns, name)
+func NewV5(ns UUID, name string) (u UUID) {
+	u = newFromHash(sha1.New(), ns, name)
 	u.SetVersion(5)
 	u.SetVariant()
 	return u
 }
 
 // Returns UUID based on hashing of namespace UUID and name.
-func newFromHash(h hash.Hash, ns UUID, name string) UUID {
-	var u UUID
+func newFromHash(h hash.Hash, ns UUID, name string) (u UUID) {
 	h.Write(ns[:])
 	h.Write([]byte(name))
 	copy(u[:], h.Sum(nil))
@@ -508,10 +505,8 @@ func newFromHash(h hash.Hash, ns UUID, name string) UUID {
 // network order. The last 86 are random bytes from the OS' CSPRNG. (Two other
 // bits are the version, 6, and variant.) 40 bits allows for a maximum
 // timestamp of 274877906944, which is August of 10680.
-func NewTime(t time.Time) UUID {
-	var u UUID
+func NewTime(t time.Time) (u UUID) {
 	binary.BigEndian.PutUint64(u[:], uint64(t.Unix()<<24))
-
 	safeRandom(u[ /* 5 */ 40/8:])
 	u.SetVersion(6)
 	u.SetVariant()
